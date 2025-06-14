@@ -1,0 +1,18 @@
+[
+  {
+    "display_name": "Lucide",
+    "path": "iconpacks/lucide.json"
+  },
+  {
+    "display_name": "Phosphor",
+    "path": "iconpacks/ph.json"
+  },
+  {
+    "display_name": "Phosphor Light",
+    "path": "iconpacks/ph-light.json"
+  },
+  {
+    "display_name": "Tabler",
+    "path": "iconpacks/tabler.json"
+  }
+]
