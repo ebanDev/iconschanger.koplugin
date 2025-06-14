@@ -62,12 +62,25 @@ function IconsChanger:addToMainMenu(menu_items)
     }
 end
 
+function IconsChanger:getActiveIconPack()
+    return self.settings:readSetting("active_icon_pack", "original")
+end
+
+function IconsChanger:setActiveIconPack(pack_identifier)
+    self.settings:saveSetting("active_icon_pack", pack_identifier)
+end
+
 function IconsChanger:getIconPackMenuItems()
     local menu_items = {}
+    local active_pack = self:getActiveIconPack()
     
     -- Add "Original Icons" as first option
+    local original_text = _("Original Icons")
+    if active_pack == "original" then
+        original_text = original_text .. " ✓"
+    end
     table.insert(menu_items, {
-        text = _("Original Icons"),
+        text = original_text,
         callback = function()
             self:restoreOriginalIcons()
         end,
@@ -87,8 +100,12 @@ function IconsChanger:getIconPackMenuItems()
         })
     else
         for _, pack in ipairs(available_packs) do
+            local pack_text = pack.display_name
+            if active_pack == pack.path then
+                pack_text = pack_text .. " ✓"
+            end
             table.insert(menu_items, {
-                text = pack.display_name,
+                text = pack_text,
                 callback = function()
                     self:applyIconPack(pack.path)
                 end,
@@ -153,6 +170,9 @@ function IconsChanger:restoreOriginalIcons()
             end
         end
         
+        -- Mark original icons as active
+        self:setActiveIconPack("original")
+        
         UIManager:show(InfoMessage:new{
             text = _("Original icons restored! Please restart KOReader."),
         })
@@ -185,13 +205,16 @@ function IconsChanger:applyIconPack(pack_path)
     
     self:backupCurrentIcons()
     
+    -- Store the pack path for tracking active pack
+    local current_pack_path = pack_path
+    
     -- Download and apply icons from Iconify API
     NetworkMgr:runWhenOnline(function()
-        self:downloadAndApplyIcons(mapping)
+        self:downloadAndApplyIcons(mapping, current_pack_path)
     end)
 end
 
-function IconsChanger:downloadAndApplyIcons(mapping)
+function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
     local total_icons = 0
     local success_count = 0
     local failed_count = 0
@@ -268,6 +291,11 @@ function IconsChanger:downloadAndApplyIcons(mapping)
             end
             
             ::continue::
+        end
+        
+        -- If download was successful, mark this pack as active
+        if success_count > 0 then
+            self:setActiveIconPack(pack_path)
         end
         
         -- Show final status
