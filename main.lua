@@ -15,6 +15,7 @@ local LuaSettings = require("luasettings")
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local InputDialog = require("ui/widget/inputdialog")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local socketutil = require("socketutil")
@@ -30,6 +31,21 @@ local IconsChanger = WidgetContainer:extend{
 
 -- Register this plugin in the more_tools menu
 require("ui/plugin/insert_menu").add("icons_changer")
+
+function IconsChanger:getPredefinedColors()
+    return {
+        { name = _("Black"), hex = "000000" },
+        { name = _("White"), hex = "ffffff" },
+        { name = _("Dark Gray"), hex = "404040" },
+        { name = _("Light Gray"), hex = "808080" },
+        { name = _("Blue"), hex = "0066cc" },
+        { name = _("Green"), hex = "00cc66" },
+        { name = _("Red"), hex = "cc0000" },
+        { name = _("Orange"), hex = "ff6600" },
+        { name = _("Purple"), hex = "6600cc" },
+        { name = _("Brown"), hex = "996633" },
+    }
+end
 
 function IconsChanger:init()
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/iconschanger.lua")
@@ -72,11 +88,35 @@ function IconsChanger:setActiveIconPack(pack_identifier)
     self.settings:flush()
 end
 
+function IconsChanger:getIconColor()
+    return self.settings:readSetting("icon_color", "000000")
+end
+
+function IconsChanger:setIconColor(color_hex)
+    -- Remove # if present and validate hex format
+    color_hex = color_hex:gsub("#", "")
+    if color_hex:match("^%x%x%x%x%x%x$") then
+        self.settings:saveSetting("icon_color", color_hex)
+        self.settings:flush()
+        return true
+    end
+    return false
+end
+
 function IconsChanger:getIconPackMenuItems()
     local menu_items = {}
     local active_pack = self:getActiveIconPack()
     
-    -- Add "Original Icons" as first option
+    -- Add color configuration option at the top with separator
+    table.insert(menu_items, {
+        text = _("Choose Icon Color"),
+        separator = true,
+        sub_item_table_func = function()
+            return self:getColorMenuItems()
+        end,
+    })
+    
+    -- Add "Original Icons" as first option (no separator, treated like other packs)
     local original_text = _("Original Icons")
     if active_pack == "original" then
         original_text = original_text .. " ✓"
@@ -118,42 +158,84 @@ function IconsChanger:getIconPackMenuItems()
     return menu_items
 end
 
-function IconsChanger:getAvailableIconPacksFromConfig()
-    local packs = {}
-    local config_file = self.path .. "/config.json"
+function IconsChanger:getColorMenuItems()
+    local menu_items = {}
+    local current_color = self:getIconColor()
     
-    local file = io.open(config_file, "r")
-    if not file then
-        logger.warn("IconsChanger: config.json not found")
-        return packs
-    end
+    -- Show current color
+    table.insert(menu_items, {
+        text = T(_("Current Color: #%1"), current_color),
+        enabled = false,
+    })
     
-    local config_data = rapidjson.decode(file:read("*all"))
-    file:close()
+    -- Add custom color option right after current color with separator
+    table.insert(menu_items, {
+        text = _("Custom Color (Hex)"),
+        separator = true,
+        callback = function()
+            self:showCustomColorDialog()
+        end,
+    })
     
-    if not config_data then
-        logger.warn("IconsChanger: Invalid config.json file")
-        return packs
-    end
-    
-    -- Validate each pack configuration
-    for _, pack_config in ipairs(config_data) do
-        if pack_config.display_name and pack_config.path then
-            local pack_file_path = self.path .. "/" .. pack_config.path
-            if lfs.attributes(pack_file_path, "mode") == "file" then
-                table.insert(packs, {
-                    display_name = pack_config.display_name,
-                    path = pack_config.path,
-                })
-            else
-                logger.warn("IconsChanger: Pack file not found:", pack_file_path)
-            end
-        else
-            logger.warn("IconsChanger: Invalid pack configuration:", pack_config)
+    -- Add predefined colors (all treated the same, no separator)
+    for _, color_info in ipairs(self:getPredefinedColors()) do
+        local color_text = color_info.name
+        if current_color:lower() == color_info.hex:lower() then
+            color_text = color_text .. " ✓"
         end
+        table.insert(menu_items, {
+            text = color_text,
+            callback = function()
+                self:setIconColor(color_info.hex)
+                UIManager:show(InfoMessage:new{
+                    text = T("Color set to %1 (#%2)", color_info.name, color_info.hex),
+                    timeout = 2,
+                })
+            end,
+        })
     end
     
-    return packs
+    return menu_items
+end
+
+function IconsChanger:showCustomColorDialog()
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Enter Custom Color"),
+        input_hint = _("Enter hex color (e.g., ff0000 or #ff0000)"),
+        input = "#" .. self:getIconColor(),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Apply"),
+                    callback = function()
+                        local color_input = input_dialog:getInputText()
+                        if self:setIconColor(color_input) then
+                            UIManager:close(input_dialog)
+                            UIManager:show(InfoMessage:new{
+                                text = T("Custom color set to #%1", color_input:gsub("#", "")),
+                                timeout = 2,
+                            })
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = "Invalid hex color format. Use 6 hex digits (e.g., ff0000)",
+                                timeout = 3,
+                            })
+                        end
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
 end
 
 function IconsChanger:restoreOriginalIcons()
@@ -239,6 +321,9 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
         })
     end
     
+    -- Get the current color setting
+    local icon_color = self:getIconColor()
+    
     local Trapper = require("ui/trapper")
     Trapper:wrap(function()
         Trapper:setPausedText("Download paused.\nDo you want to continue or abort downloading icons?")
@@ -253,7 +338,7 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
             end
             
             local icon_name = icon_info.iconify_id:sub(#prefix + 2) -- Remove prefix and hyphen
-            local url = "https://api.iconify.design/" .. prefix .. "/" .. icon_name .. ".svg?color=%23000000"
+            local url = "https://api.iconify.design/" .. prefix .. "/" .. icon_name .. ".svg?color=%23" .. icon_color
             
             -- Update progress display
             local progress_text = T(_("Downloading icons (%1/%2): %3"), index, total_icons, icon_info.current)
@@ -300,7 +385,7 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
         -- Show final status
         local status_text
         if failed_count == 0 then
-            status_text = T(_("Successfully downloaded %1 icons! Please restart KOReader."), success_count)
+            status_text = T(_("Successfully downloaded %1 icons with color #%2! Please restart KOReader."), success_count, icon_color)
         else
             status_text = T(_("Downloaded %1 icons, %2 failed. Please restart KOReader."), success_count, failed_count)
         end
@@ -441,6 +526,26 @@ function IconsChanger:handleMigrationFromSystemIcons()
         
         logger.info("IconsChanger: Migration completed successfully")
     end
+end
+
+function IconsChanger:getAvailableIconPacksFromConfig()
+    local config_file = self.path .. "/config.json"
+    local file = io.open(config_file, "r")
+    if not file then
+        logger.warn("IconsChanger: config.json not found")
+        return {}
+    end
+    
+    local config_content = file:read("*all")
+    file:close()
+    
+    local success, config = pcall(rapidjson.decode, config_content)
+    if not success or type(config) ~= "table" then
+        logger.warn("IconsChanger: Invalid config.json format")
+        return {}
+    end
+    
+    return config
 end
 
 return IconsChanger
