@@ -69,6 +69,7 @@ end
 
 function IconsChanger:setActiveIconPack(pack_identifier)
     self.settings:saveSetting("active_icon_pack", pack_identifier)
+    self.settings:flush()
 end
 
 function IconsChanger:getIconPackMenuItems()
