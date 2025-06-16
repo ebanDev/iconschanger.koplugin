@@ -8,20 +8,15 @@ and mapping them according to icon pack configurations.
 --]]--
 
 local DataStorage = require("datastorage")
-local Dispatcher = require("dispatcher")
 local FFIUtil = require("ffi/util")
 local InfoMessage = require("ui/widget/infomessage")
-local InputDialog = require("ui/widget/inputdialog")
 local rapidjson = require("rapidjson")
 local LuaSettings = require("luasettings")
-local Menu = require("ui/widget/menu")
 local NetworkMgr = require("ui/network/manager")
-local Screen = require("device").screen
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
-local util = require("util")
 local socketutil = require("socketutil")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
@@ -39,16 +34,22 @@ require("ui/plugin/insert_menu").add("icons_changer")
 function IconsChanger:init()
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/iconschanger.lua")
     self.icon_packs_dir = self.path .. "/iconpacks"
-    self.icons_dir = "resources/icons/mdlight"
+    
+    -- Use KOReader's user icons directory instead of overwriting system icons
+    self.user_icons_dir = DataStorage:getDataDir() .. "/icons"
+    self.system_icons_dir = "resources/icons/mdlight"  -- Keep reference for migration
     self.backup_dir = DataStorage:getSettingsDir() .. "/iconschanger_backup"
     
     -- Ensure directories exist
-    if not lfs.attributes(self.backup_dir, "mode") then
-        lfs.mkdir(self.backup_dir)
-    end
     if not lfs.attributes(self.icon_packs_dir, "mode") then
         lfs.mkdir(self.icon_packs_dir)
     end
+    if not lfs.attributes(self.user_icons_dir, "mode") then
+        lfs.mkdir(self.user_icons_dir)
+    end
+    
+    -- Handle migration from old version that overwrote system icons
+    self:handleMigrationFromSystemIcons()
     
     self.ui.menu:registerToMainMenu(self)
 end
@@ -155,18 +156,15 @@ function IconsChanger:getAvailableIconPacksFromConfig()
 end
 
 function IconsChanger:restoreOriginalIcons()
-    local backup_done_file = self.backup_dir .. "/.backup_done"
-    if not lfs.attributes(backup_done_file, "mode") then
-        UIManager:show(InfoMessage:new{
-            text = _("No backup found"),
-        })
-        return
-    end
-    
-    if lfs.attributes(self.backup_dir, "mode") == "directory" then
-        for file in lfs.dir(self.backup_dir) do
+    -- For the new user icons approach, we just remove user icons
+    if lfs.attributes(self.user_icons_dir, "mode") == "directory" then
+        -- Remove all user icons
+        for file in lfs.dir(self.user_icons_dir) do
             if file:match("%.svg$") then
-                FFIUtil.copyFile(self.backup_dir .. "/" .. file, self.icons_dir .. "/" .. file)
+                local user_icon_file = self.user_icons_dir .. "/" .. file
+                if lfs.attributes(user_icon_file, "mode") == "file" then
+                    os.remove(user_icon_file)
+                end
             end
         end
         
@@ -175,6 +173,10 @@ function IconsChanger:restoreOriginalIcons()
         
         UIManager:show(InfoMessage:new{
             text = _("Original icons restored! Please restart KOReader."),
+        })
+    else
+        UIManager:show(InfoMessage:new{
+            text = _("No custom icons to remove"),
         })
     end
 end
@@ -203,14 +205,10 @@ function IconsChanger:applyIconPack(pack_path)
         timeout = 2,
     })
     
-    self:backupCurrentIcons()
-    
-    -- Store the pack path for tracking active pack
-    local current_pack_path = pack_path
     
     -- Download and apply icons from Iconify API
     NetworkMgr:runWhenOnline(function()
-        self:downloadAndApplyIcons(mapping, current_pack_path)
+        self:downloadAndApplyIcons(mapping, pack_path)
     end)
 end
 
@@ -274,13 +272,13 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
             local success, body_or_error = self:httpRequestSync(url)
             
             if success then
-                local icon_file = self.icons_dir .. "/" .. icon_info.current .. ".svg"
+                local icon_file = self.user_icons_dir .. "/" .. icon_info.current .. ".svg"
                 local file = io.open(icon_file, "w")
                 if file then
                     file:write(body_or_error)
                     file:close()
                     success_count = success_count + 1
-                    logger.info("IconsChanger: Successfully downloaded", icon_info.current)
+                    logger.info("IconsChanger: Successfully downloaded", icon_info.current, "to user icons directory")
                 else
                     failed_count = failed_count + 1
                     logger.warn("IconsChanger: Failed to write file for", icon_info.current)
@@ -358,15 +356,18 @@ function IconsChanger:httpRequestSync(url)
 end
 
 function IconsChanger:backupCurrentIcons()
+    -- For backwards compatibility, we still keep this function
+    -- but it's only used during migration now
     local backup_done_file = self.backup_dir .. "/.backup_done"
     if lfs.attributes(backup_done_file, "mode") then
         return -- backup already exists
     end
     
-    if lfs.attributes(self.icons_dir, "mode") == "directory" then
-        for file in lfs.dir(self.icons_dir) do
+    -- Only backup if system icons directory exists and we haven't backed up yet
+    if lfs.attributes(self.system_icons_dir, "mode") == "directory" then
+        for file in lfs.dir(self.system_icons_dir) do
             if file:match("%.svg$") then
-                FFIUtil.copyFile(self.icons_dir .. "/" .. file, self.backup_dir .. "/" .. file)
+                FFIUtil.copyFile(self.system_icons_dir .. "/" .. file, self.backup_dir .. "/" .. file)
             end
         end
         local marker = io.open(backup_done_file, "w")
@@ -374,6 +375,70 @@ function IconsChanger:backupCurrentIcons()
             marker:write("backup completed")
             marker:close()
         end
+    end
+end
+
+function IconsChanger:handleMigrationFromSystemIcons()
+    -- Check if we have a backup (indicating the old version was used)
+    local backup_done_file = self.backup_dir .. "/.backup_done"
+    local migration_done_file = self.backup_dir .. "/.migration_done"
+    
+    -- If we have a backup but haven't migrated yet
+    if lfs.attributes(backup_done_file, "mode") and not lfs.attributes(migration_done_file, "mode") then
+        logger.info("IconsChanger: Migrating from old version that modified system icons")
+        
+        -- Step 1: Restore original system icons from backup
+        if lfs.attributes(self.backup_dir, "mode") == "directory" then
+            for file in lfs.dir(self.backup_dir) do
+                if file:match("%.svg$") then
+                    local backup_file = self.backup_dir .. "/" .. file
+                    local system_file = self.system_icons_dir .. "/" .. file
+                    if lfs.attributes(backup_file, "mode") == "file" then
+                        FFIUtil.copyFile(backup_file, system_file)
+                        logger.dbg("IconsChanger: Restored system icon:", file)
+                    end
+                end
+            end
+        end
+        
+        -- Step 2: Check if user had an active icon pack and preserve it in user directory
+        local active_pack = self:getActiveIconPack()
+        if active_pack ~= "original" then
+            logger.info("IconsChanger: Preserving active icon pack in user directory:", active_pack)
+            -- The current system icons are the user's chosen pack, so copy them to user directory
+            if lfs.attributes(self.system_icons_dir, "mode") == "directory" then
+                for file in lfs.dir(self.system_icons_dir) do
+                    if file:match("%.svg$") and file ~= "." and file ~= ".." then
+                        local system_file = self.system_icons_dir .. "/" .. file
+                        local user_file = self.user_icons_dir .. "/" .. file
+                        -- Only copy if the file was likely modified by our plugin
+                        FFIUtil.copyFile(system_file, user_file)
+                    end
+                end
+            end
+            
+            -- Now restore the original system icons
+            if lfs.attributes(self.backup_dir, "mode") == "directory" then
+                for file in lfs.dir(self.backup_dir) do
+                    if file:match("%.svg$") then
+                        local backup_file = self.backup_dir .. "/" .. file
+                        local system_file = self.system_icons_dir .. "/" .. file
+                        if lfs.attributes(backup_file, "mode") == "file" then
+                            FFIUtil.copyFile(backup_file, system_file)
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Mark migration as completed
+        local marker = io.open(migration_done_file, "w")
+        if marker then
+            marker:write("migration completed from system icons to user icons")
+            marker:close()
+        end
+        
+        logger.info("IconsChanger: Migration completed successfully")
     end
 end
 
