@@ -18,5 +18,9 @@
   {
     "display_name": "Custom Example (Local + Iconify)",
     "path": "iconpacks/custom-example.json"
+  },
+  {
+    "display_name": "Mixed Demo Pack",
+    "path": "iconpacks/mixed-demo.json"
   }
 ]

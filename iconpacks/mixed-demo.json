@@ -1,0 +1,18 @@
+{
+  "home": "local:mixed-demo/home.svg",
+  "close": "local:mixed-demo/close.svg", 
+  "check": "local:mixed-demo/check.svg",
+  "appbar.search": "lucide-search",
+  "appbar.settings": "lucide-settings",
+  "appbar.menu": "lucide-menu",
+  "wifi.open.0": "lucide-wifi-off",
+  "wifi.open.25": "lucide-wifi-1", 
+  "wifi.open.50": "lucide-wifi-2",
+  "wifi.open.75": "lucide-wifi-3",
+  "wifi.open.100": "lucide-wifi",
+  "wifi.secure.0": "lucide-wifi-off",
+  "wifi.secure.25": "lucide-wifi-1",
+  "wifi.secure.50": "lucide-wifi-2",
+  "wifi.secure.75": "lucide-wifi-3",
+  "wifi.secure.100": "lucide-wifi"
+}

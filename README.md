@@ -85,6 +85,54 @@ To add custom icons:
 3. Create a JSON mapping file in `iconpacks/` that references your icons using the `local:` prefix
 4. Add your icon pack to `config.json`
 
+#### Step-by-Step Example
+
+1. **Create the icon directory:**
+   ```bash
+   mkdir icons/my-pack
+   ```
+
+2. **Add your SVG files:**
+   ```bash
+   # Copy your custom SVG files to icons/my-pack/
+   # For example: home.svg, search.svg, settings.svg
+   ```
+
+3. **Create the mapping file `iconpacks/my-pack.json`:**
+   ```json
+   {
+     "home": "local:my-pack/home.svg",
+     "appbar.search": "local:my-pack/search.svg", 
+     "appbar.settings": "local:my-pack/settings.svg",
+     "wifi.open.0": "lucide-wifi-off",
+     "wifi.open.100": "lucide-wifi"
+   }
+   ```
+
+4. **Add to `config.json`:**
+   ```json
+   {
+     "display_name": "My Custom Pack",
+     "path": "iconpacks/my-pack.json"
+   }
+   ```
+
+#### Local vs Remote Icons
+
+**Local Icons (`local:` prefix):**
+- ✅ No internet connection required
+- ✅ Faster application (no download needed)
+- ✅ Perfect for custom designs or proprietary icons
+- ✅ Full control over icon design and styling
+- ❌ Manual color changes require editing SVG files
+
+**Iconify Icons (no prefix):**
+- ✅ Automatic color customization via plugin settings
+- ✅ Access to 200k+ professionally designed icons
+- ✅ Consistent icon families and styles
+- ❌ Requires internet connection for initial download
+- ❌ Limited to available Iconify icon sets
+
 ## How It Works
 
 1. **Icon Discovery:** The plugin scans KOReader's current icon directory (`resources/icons/mdlight/`)
@@ -122,9 +170,33 @@ This plugin uses the [Iconify API](https://api.iconify.design) to:
 - Verify the icon pack name is correct
 - Check the [Iconify website](https://iconify.design) for available icon sets
 
+**Custom icons not working:**
+- Use the included validation script: `python3 validate_icon_pack.py`
+- Ensure local icon paths use forward slashes: `local:my-pack/icon.svg`
+- Check that SVG files exist in the `icons/` directory
+- Verify JSON syntax in your mapping files
+
 **Some icons missing after applying pack:**
 - Not all KOReader icons may have equivalents in every icon pack
 - The original icon will remain if no suitable replacement is found
+
+## Validation Tool
+
+The plugin includes a validation script to help you check your custom icon packs:
+
+```bash
+# Validate all icon packs
+python3 validate_icon_pack.py
+
+# Validate a specific pack
+python3 validate_icon_pack.py my-pack-name
+```
+
+The validator checks:
+- JSON syntax and structure
+- Local icon file existence
+- Mapping format correctness
+- Directory structure
 
 ## Contributing
 
