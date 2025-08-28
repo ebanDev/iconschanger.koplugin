@@ -1,0 +1,20 @@
+# Temporary test files
+/tmp/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor backup files
+*~
+*.bak
+*.backup
+
+# KOReader specific temporary files
+*.test
+*.log
+
+# OS specific files
+.DS_Store
+Thumbs.db
