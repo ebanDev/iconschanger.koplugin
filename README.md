@@ -5,6 +5,8 @@ This plugin allows you to change KOReader's icon pack by downloading icons from 
 ## Features
 
 - Download icon packs from Iconify (200k+ icons from 150+ icon sets)
+- **Custom local icons**: Store and use your own SVG icons directly in the plugin repository
+- **Mixed icon packs**: Combine both local custom icons and Iconify icons in the same pack
 - Backup and restore functionality for original icons
 - Support for popular icon packs like Lucide, Feather, Heroicons, Material Design Icons, and many others
 - Easy-to-use interface integrated into KOReader's menu system
@@ -43,23 +45,55 @@ Here are some popular icon packs you can try:
 
 ### Custom Icon Mappings
 
-You can create custom icon mappings by creating JSON files in the `iconpacks` directory. The format is:
+You can create custom icon mappings by creating JSON files in the `iconpacks` directory. The plugin supports two types of icon sources:
 
+#### 1. Iconify Icons (Downloaded from API)
+Use the standard Iconify format for icons downloaded from the API:
 ```json
 {
-  "koreader_icon_name": "new_icon_pack_icon_name",
-  "wifi.open.0": "wifi-off",
-  "appbar.search": "search",
-  "home": "home"
+  "koreader_icon_name": "iconify_pack_icon_name",
+  "wifi.open.0": "lucide-wifi-off",
+  "appbar.search": "lucide-search",
+  "home": "lucide-home"
 }
 ```
+
+#### 2. Local Custom Icons (Stored in Repository)
+Use the `local:` prefix to reference SVG files stored in the `icons/` directory:
+```json
+{
+  "koreader_icon_name": "local:subdirectory/icon_file.svg",
+  "home": "local:custom-pack/home.svg",
+  "appbar.search": "local:custom-pack/search.svg"
+}
+```
+
+#### 3. Mixed Icon Packs
+You can mix both local and Iconify icons in the same pack:
+```json
+{
+  "home": "local:custom-pack/home.svg",
+  "appbar.search": "lucide-search",
+  "wifi.open.0": "local:custom-pack/wifi-off.svg",
+  "appbar.settings": "lucide-settings"
+}
+```
+
+To add custom icons:
+1. Create a subdirectory in the `icons/` folder (e.g., `icons/my-custom-pack/`)
+2. Add your SVG icon files to that directory
+3. Create a JSON mapping file in `iconpacks/` that references your icons using the `local:` prefix
+4. Add your icon pack to `config.json`
 
 ## How It Works
 
 1. **Icon Discovery:** The plugin scans KOReader's current icon directory (`resources/icons/mdlight/`)
-2. **Pack Analysis:** When downloading a pack, it fetches the icon list from Iconify's API
-3. **Safe Application:** Original icons are backed up before applying new ones
-4. **SVG Download:** Individual icons are downloaded from Iconify's API as SVG files
+2. **Pack Analysis:** When applying a pack, it processes the icon mappings from JSON files
+3. **Icon Processing:** 
+   - For Iconify icons (no prefix): Downloads SVG files from Iconify's API with customizable colors
+   - For local icons (`local:` prefix): Copies SVG files from the plugin's `icons/` directory
+4. **Safe Application:** Icons are applied to the user's icon directory, leaving system icons untouched
+5. **Backup Support:** Original icons can always be restored
 
 ## Iconify API
 

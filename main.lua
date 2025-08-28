@@ -284,12 +284,12 @@ function IconsChanger:applyIconPack(pack_path)
     end
     
     UIManager:show(InfoMessage:new{
-        text = _("Downloading and applying icon pack..."),
+        text = _("Processing and applying icon pack..."),
         timeout = 2,
     })
     
     
-    -- Download and apply icons from Iconify API
+    -- Process icons (both local and from Iconify API)
     NetworkMgr:runWhenOnline(function()
         self:downloadAndApplyIcons(mapping, pack_path)
     end)
@@ -329,52 +329,83 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
         Trapper:setPausedText("Download paused.\nDo you want to continue or abort downloading icons?")
         
         for index, icon_info in ipairs(icons_to_process) do
-            -- Extract prefix from the iconify_id (everything before the first hyphen)
-            local prefix = icon_info.iconify_id:match("^([^-]+)")
-            if not prefix then
-                logger.warn("IconsChanger: Could not extract prefix from", icon_info.iconify_id)
-                failed_count = failed_count + 1
-                goto continue
-            end
-            
-            local icon_name = icon_info.iconify_id:sub(#prefix + 2) -- Remove prefix and hyphen
-            local url = "https://api.iconify.design/" .. prefix .. "/" .. icon_name .. ".svg?color=%23" .. icon_color
-            
             -- Update progress display
-            local progress_text = T(_("Downloading icons (%1/%2): %3"), index, total_icons, icon_info.current)
+            local progress_text = T(_("Processing icons (%1/%2): %3"), index, total_icons, icon_info.current)
             local go_on = Trapper:info(progress_text)
             if not go_on then
                 Trapper:clear()
                 UIManager:show(InfoMessage:new{
-                    text = _("Download cancelled"),
+                    text = _("Processing cancelled"),
                     timeout = 2,
                 })
                 return
             end
             
-            logger.dbg("IconsChanger: Downloading", icon_info.current, "from", url)
+            local success = false
+            local error_msg = ""
             
-            -- Download synchronously
-            local success, body_or_error = self:httpRequestSync(url)
-            
-            if success then
-                local icon_file = self.user_icons_dir .. "/" .. icon_info.current .. ".svg"
-                local file = io.open(icon_file, "w")
-                if file then
-                    file:write(body_or_error)
-                    file:close()
-                    success_count = success_count + 1
-                    logger.info("IconsChanger: Successfully downloaded", icon_info.current, "to user icons directory")
+            -- Check if this is a local icon (starts with "local:")
+            if icon_info.iconify_id:match("^local:") then
+                -- Local icon - copy from repository
+                local local_path = icon_info.iconify_id:sub(7) -- Remove "local:" prefix
+                local source_file = self.path .. "/icons/" .. local_path
+                local target_file = self.user_icons_dir .. "/" .. icon_info.current .. ".svg"
+                
+                logger.dbg("IconsChanger: Copying local icon", icon_info.current, "from", source_file)
+                
+                -- Check if source file exists
+                if lfs.attributes(source_file, "mode") == "file" then
+                    success = FFIUtil.copyFile(source_file, target_file)
+                    if success then
+                        logger.info("IconsChanger: Successfully copied local icon", icon_info.current, "to user icons directory")
+                    else
+                        error_msg = "Failed to copy file"
+                        logger.warn("IconsChanger: Failed to copy local icon", icon_info.current)
+                    end
                 else
-                    failed_count = failed_count + 1
-                    logger.warn("IconsChanger: Failed to write file for", icon_info.current)
+                    error_msg = "Source file not found: " .. source_file
+                    logger.warn("IconsChanger: Local icon source file not found:", source_file)
                 end
             else
-                failed_count = failed_count + 1
-                logger.warn("IconsChanger: Failed to download", icon_info.current, "->", icon_info.iconify_id, "Error:", body_or_error)
+                -- Iconify icon - download from API
+                local prefix = icon_info.iconify_id:match("^([^-]+)")
+                if not prefix then
+                    logger.warn("IconsChanger: Could not extract prefix from", icon_info.iconify_id)
+                    error_msg = "Invalid iconify ID format"
+                else
+                    local icon_name = icon_info.iconify_id:sub(#prefix + 2) -- Remove prefix and hyphen
+                    local url = "https://api.iconify.design/" .. prefix .. "/" .. icon_name .. ".svg?color=%23" .. icon_color
+                    
+                    logger.dbg("IconsChanger: Downloading", icon_info.current, "from", url)
+                    
+                    -- Download synchronously
+                    local body_or_error
+                    success, body_or_error = self:httpRequestSync(url)
+                    
+                    if success then
+                        local icon_file = self.user_icons_dir .. "/" .. icon_info.current .. ".svg"
+                        local file = io.open(icon_file, "w")
+                        if file then
+                            file:write(body_or_error)
+                            file:close()
+                            logger.info("IconsChanger: Successfully downloaded", icon_info.current, "to user icons directory")
+                        else
+                            success = false
+                            error_msg = "Failed to write file"
+                            logger.warn("IconsChanger: Failed to write file for", icon_info.current)
+                        end
+                    else
+                        error_msg = body_or_error
+                        logger.warn("IconsChanger: Failed to download", icon_info.current, "->", icon_info.iconify_id, "Error:", body_or_error)
+                    end
+                end
             end
             
-            ::continue::
+            if success then
+                success_count = success_count + 1
+            else
+                failed_count = failed_count + 1
+            end
         end
         
         -- If download was successful, mark this pack as active
@@ -385,9 +416,9 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
         -- Show final status
         local status_text
         if failed_count == 0 then
-            status_text = T(_("Successfully downloaded %1 icons with color #%2! Please restart KOReader."), success_count, icon_color)
+            status_text = T(_("Successfully processed %1 icons! Please restart KOReader."), success_count)
         else
-            status_text = T(_("Downloaded %1 icons, %2 failed. Please restart KOReader."), success_count, failed_count)
+            status_text = T(_("Processed %1 icons, %2 failed. Please restart KOReader."), success_count, failed_count)
         end
         Trapper:clear()
         UIManager:show(InfoMessage:new{

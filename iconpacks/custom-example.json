@@ -1,0 +1,10 @@
+{
+  "home": "local:custom-example/home.svg",
+  "appbar.search": "local:custom-example/appbar.search.svg",
+  "appbar.settings": "local:custom-example/appbar.settings.svg",
+  "wifi.open.0": "lucide-wifi-off",
+  "wifi.open.25": "lucide-wifi-1", 
+  "wifi.open.50": "lucide-wifi-2",
+  "wifi.open.75": "lucide-wifi-3",
+  "wifi.open.100": "lucide-wifi"
+}
