@@ -8,6 +8,7 @@ and mapping them according to icon pack configurations.
 --]]--
 
 local DataStorage = require("datastorage")
+local ConfirmBox = require("ui/widget/confirmbox")
 local FFIUtil = require("ffi/util")
 local InfoMessage = require("ui/widget/infomessage")
 local rapidjson = require("rapidjson")
@@ -21,12 +22,49 @@ local logger = require("logger")
 local socketutil = require("socketutil")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
+local util = require("util")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local IconsChanger = WidgetContainer:extend{
     name = "iconschanger",
     is_doc_only = false,
+}
+
+local SIMPLEUI_ICON_SOURCES = {
+    { target = "sui_menu", source = "appbar.menu" },
+    { target = "sui_search", source = "appbar.search" },
+    { target = "sui_back", source = "chevron.left" },
+    { target = "sui_browse_normal", source = "appbar.navigation" },
+    { target = "sui_browse_author", source = "appbar.filebrowser" },
+    { target = "sui_browse_series", source = "appbar.filebrowser" },
+    { target = "sui_browse_tags", source = "appbar.navigation" },
+    { target = "sui_pager_prev", source = "chevron.left" },
+    { target = "sui_pager_next", source = "chevron.right" },
+    { target = "sui_pager_first", source = "chevron.first" },
+    { target = "sui_pager_last", source = "chevron.last" },
+    { target = "sui_navpager_prev", source = "chevron.left" },
+    { target = "sui_navpager_next", source = "chevron.right" },
+    { target = "sui_coll_back", source = "chevron.left" },
+    { target = "sui_qa_folder", source = "appbar.filebrowser" },
+    { target = "sui_qa_plugin", source = "appbar.tools" },
+    { target = "sui_qa_system", source = "appbar.settings" },
+    { target = "sui_fc_empty", source = "appbar.filebrowser" },
+    { target = "sui_action_library", source = "simpleui.library" },
+    { target = "sui_action_homescreen", source = "home" },
+    { target = "sui_action_collections", source = "bookmark" },
+    { target = "sui_action_history", source = "cre.render.reload" },
+    { target = "sui_action_continue", source = "book.opened" },
+    { target = "sui_action_favorites", source = "star.full" },
+    { target = "sui_action_bookmark_browser", source = "bookmark" },
+    { target = "sui_action_wifi_toggle", source = "wifi" },
+    { target = "sui_action_wifi_toggle_off", source = "wifi.open.0" },
+    { target = "sui_action_frontlight", source = "appbar.contrast" },
+    { target = "sui_action_stats_calendar", source = "appbar.pageview" },
+    { target = "sui_action_power", source = "exit" },
+    { target = "sui_action_browse_authors", source = "appbar.navigation" },
+    { target = "sui_action_browse_series", source = "appbar.filebrowser" },
+    { target = "sui_action_browse_tags", source = "appbar.navigation" },
 }
 
 -- Register this plugin in the more_tools menu
@@ -149,7 +187,7 @@ function IconsChanger:getIconPackMenuItems()
             table.insert(menu_items, {
                 text = pack_text,
                 callback = function()
-                    self:applyIconPack(pack.path)
+                    self:selectIconPack(pack.path)
                 end,
             })
         end
@@ -264,7 +302,43 @@ function IconsChanger:restoreOriginalIcons()
     end
 end
 
-function IconsChanger:applyIconPack(pack_path)
+function IconsChanger:isSimpleUIInstalled()
+    if package.loaded["sui_style"] then
+        return true
+    end
+
+    local plugin_dir = self.path:match("^(.*)/[^/]+$")
+    local candidates = {
+        DataStorage:getDataDir() .. "/plugins/simpleui.koplugin",
+        plugin_dir and plugin_dir .. "/simpleui.koplugin",
+    }
+    for _, path in ipairs(candidates) do
+        if path and lfs.attributes(path, "mode") == "directory" then
+            return true
+        end
+    end
+    return false
+end
+
+function IconsChanger:selectIconPack(pack_path)
+    if not self:isSimpleUIInstalled() then
+        self:applyIconPack(pack_path, false)
+        return
+    end
+
+    UIManager:show(ConfirmBox:new{
+        text = _("SimpleUI is installed. Update and enable matching SimpleUI icons too?"),
+        ok_text = _("Update SimpleUI"),
+        ok_callback = function()
+            self:applyIconPack(pack_path, true)
+        end,
+        cancel_callback = function()
+            self:applyIconPack(pack_path, false)
+        end,
+    })
+end
+
+function IconsChanger:applyIconPack(pack_path, include_simpleui)
     local file = io.open(self.path .. "/" .. pack_path, "r")
     if not file then
         UIManager:show(InfoMessage:new{
@@ -291,18 +365,206 @@ function IconsChanger:applyIconPack(pack_path)
     
     -- Download and apply icons from Iconify API
     NetworkMgr:runWhenOnline(function()
-        self:downloadAndApplyIcons(mapping, pack_path)
+        self:downloadAndApplyIcons(mapping, pack_path, include_simpleui)
     end)
 end
 
-function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
+function IconsChanger:getSimpleUIPackDir(pack_path)
+    local pack_name = pack_path:match("([^/]+)%.json$") or "custom"
+    return DataStorage:getSettingsDir() .. "/simpleui/sui_icons/packs/iconschanger-" .. pack_name
+end
+
+function IconsChanger:getSimpleUIIcons(mapping)
+    local icons = {}
+    for _, icon in ipairs(SIMPLEUI_ICON_SOURCES) do
+        local iconify_id = mapping[icon.source]
+        if iconify_id then
+            table.insert(icons, {
+                current = icon.target,
+                iconify_id = iconify_id,
+            })
+        end
+    end
+    return icons
+end
+
+function IconsChanger:getSimpleUIIconsDir()
+    return DataStorage:getSettingsDir() .. "/simpleui/sui_icons"
+end
+
+function IconsChanger:shouldIncludeSimpleUICatalogIcon(pack_path, icon_name)
+    if pack_path:match("/ph%-light%.json$") then
+        return icon_name:match("%-light$") ~= nil
+    elseif pack_path:match("/ph%.json$") then
+        return not icon_name:match("%-bold$")
+            and not icon_name:match("%-duotone$")
+            and not icon_name:match("%-fill$")
+            and not icon_name:match("%-light$")
+            and not icon_name:match("%-thin$")
+    end
+    return true
+end
+
+function IconsChanger:getSimpleUICatalogIcons(mapping, pack_path)
+    local iconify_id = mapping["simpleui.library"] or mapping.home
+    local prefix = iconify_id and iconify_id:match("^([^-]+)")
+    if not prefix then
+        return nil, _("Could not determine Iconify collection")
+    end
+
+    local success, body_or_error = self:httpRequestSync("https://api.iconify.design/collection?prefix=" .. prefix)
+    if not success then
+        return nil, body_or_error
+    end
+
+    local ok, collection = pcall(rapidjson.decode, body_or_error)
+    if not ok or type(collection) ~= "table" or type(collection.uncategorized) ~= "table" then
+        return nil, _("Invalid Iconify collection response")
+    end
+
+    local icons = {}
+    for _, icon_name in ipairs(collection.uncategorized) do
+        if self:shouldIncludeSimpleUICatalogIcon(pack_path, icon_name) then
+            table.insert(icons, icon_name)
+        end
+    end
+    return icons, prefix
+end
+
+function IconsChanger:clearSimpleUICatalog(icons_dir)
+    if lfs.attributes(icons_dir, "mode") ~= "directory" then
+        return
+    end
+    for file in lfs.dir(icons_dir) do
+        if file:match("^iconschanger%-.*%.svg$") then
+            os.remove(icons_dir .. "/" .. file)
+        end
+    end
+end
+
+function IconsChanger:writeSimpleUICatalogBatch(prefix, icon_names, icons_dir, file_prefix)
+    local url = "https://api.iconify.design/" .. prefix .. ".json?icons=" .. table.concat(icon_names, ",")
+    local success, body_or_error = self:httpRequestSync(url)
+    if not success then
+        return 0, #icon_names
+    end
+
+    local ok, collection = pcall(rapidjson.decode, body_or_error)
+    if not ok or type(collection) ~= "table" or type(collection.icons) ~= "table" then
+        return 0, #icon_names
+    end
+
+    local success_count = 0
+    local failed_count = 0
+    for _, icon_name in ipairs(icon_names) do
+        local icon = collection.icons[icon_name]
+        if type(icon) == "table" and type(icon.body) == "string" then
+            local width = icon.width or collection.width or 16
+            local height = icon.height or collection.height or 16
+            local body = icon.body:gsub("currentColor", "#000000")
+            local svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '
+                .. width .. " " .. height .. '" color="#000000">'
+                .. body .. "</svg>"
+            local file = io.open(icons_dir .. "/" .. file_prefix .. icon_name .. ".svg", "w")
+            if file then
+                file:write(svg)
+                file:close()
+                success_count = success_count + 1
+            else
+                failed_count = failed_count + 1
+            end
+        else
+            failed_count = failed_count + 1
+        end
+    end
+    return success_count, failed_count
+end
+
+function IconsChanger:downloadSimpleUICatalog(mapping, pack_path, Trapper)
+    local icons, prefix_or_error = self:getSimpleUICatalogIcons(mapping, pack_path)
+    if not icons then
+        return 0, 0, prefix_or_error
+    end
+
+    local icons_dir = self:getSimpleUIIconsDir()
+    local ok, err = util.makePath(icons_dir)
+    if not ok then
+        return 0, 0, err
+    end
+    self:clearSimpleUICatalog(icons_dir)
+
+    local batch_size = 100
+    local file_prefix = "iconschanger-" .. prefix_or_error .. "-"
+    local success_count = 0
+    local failed_count = 0
+    for start_index = 1, #icons, batch_size do
+        local icon_names = {}
+        local end_index = math.min(start_index + batch_size - 1, #icons)
+        for index = start_index, end_index do
+            table.insert(icon_names, icons[index])
+        end
+        local go_on = Trapper:info(T(_("Downloading SimpleUI icon catalog (%1/%2)"), end_index, #icons))
+        if not go_on then
+            return success_count, failed_count, _("Download cancelled")
+        end
+        local batch_success, batch_failed =
+            self:writeSimpleUICatalogBatch(prefix_or_error, icon_names, icons_dir, file_prefix)
+        success_count = success_count + batch_success
+        failed_count = failed_count + batch_failed
+    end
+    return success_count, failed_count
+end
+
+function IconsChanger:activateSimpleUIPack(pack_dir)
+    local ok_style, style = pcall(require, "sui_style")
+    if ok_style and style and style.applyPack then
+        local result, err = style.applyPack(pack_dir)
+        return result ~= nil, err
+    end
+
+    local settings_dir = DataStorage:getSettingsDir() .. "/simpleui"
+    local ok, err = util.makePath(settings_dir)
+    if not ok then
+        return false, err
+    end
+
+    local settings = LuaSettings:open(settings_dir .. "/sui_settings.lua")
+    for _, icon in ipairs(SIMPLEUI_ICON_SOURCES) do
+        local key
+        local action_id = icon.target:match("^sui_action_(.+)$")
+        if action_id then
+            if action_id == "library" then
+                action_id = "home"
+            end
+            key = "simpleui_action_" .. action_id .. "_icon"
+        else
+            key = "simpleui_sysicon_" .. icon.target
+        end
+        local icon_file = pack_dir .. "/" .. icon.target .. ".svg"
+        if lfs.attributes(icon_file, "mode") == "file" then
+            settings:saveSetting(key, icon_file)
+        end
+    end
+    settings:flush()
+    return true
+end
+
+function IconsChanger:downloadAndApplyIcons(mapping, pack_path, include_simpleui)
     local total_icons = 0
     local success_count = 0
     local failed_count = 0
+    local simpleui_success_count = 0
+    local simpleui_catalog_count = 0
+    local simpleui_catalog_failed_count = 0
+    local simpleui_catalog_error
+    local simpleui_pack_dir
+    local simpleui_enabled = false
     
     -- Count total icons
-    for _, _ in pairs(mapping) do
-        total_icons = total_icons + 1
+    for current_icon, _ in pairs(mapping) do
+        if not current_icon:match("^simpleui%.") then
+            total_icons = total_icons + 1
+        end
     end
     
     if total_icons == 0 then
@@ -315,10 +577,29 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
     -- Convert mapping to array for sequential processing
     local icons_to_process = {}
     for current_icon, iconify_id in pairs(mapping) do
-        table.insert(icons_to_process, {
-            current = current_icon,
-            iconify_id = iconify_id
-        })
+        if not current_icon:match("^simpleui%.") then
+            table.insert(icons_to_process, {
+                current = current_icon,
+                iconify_id = iconify_id,
+                output_dir = self.user_icons_dir,
+            })
+        end
+    end
+
+    if include_simpleui then
+        simpleui_pack_dir = self:getSimpleUIPackDir(pack_path)
+        local ok, err = util.makePath(simpleui_pack_dir)
+        if not ok then
+            logger.warn("IconsChanger: Failed to create SimpleUI pack directory:", err)
+            include_simpleui = false
+        else
+            for _, icon in ipairs(self:getSimpleUIIcons(mapping)) do
+                icon.output_dir = simpleui_pack_dir
+                icon.is_simpleui = true
+                table.insert(icons_to_process, icon)
+                total_icons = total_icons + 1
+            end
+        end
     end
     
     -- Get the current color setting
@@ -358,13 +639,16 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
             local success, body_or_error = self:httpRequestSync(url)
             
             if success then
-                local icon_file = self.user_icons_dir .. "/" .. icon_info.current .. ".svg"
+                local icon_file = icon_info.output_dir .. "/" .. icon_info.current .. ".svg"
                 local file = io.open(icon_file, "w")
                 if file then
                     file:write(body_or_error)
                     file:close()
                     success_count = success_count + 1
-                    logger.info("IconsChanger: Successfully downloaded", icon_info.current, "to user icons directory")
+                    if icon_info.is_simpleui then
+                        simpleui_success_count = simpleui_success_count + 1
+                    end
+                    logger.info("IconsChanger: Successfully downloaded", icon_info.current, "to", icon_info.output_dir)
                 else
                     failed_count = failed_count + 1
                     logger.warn("IconsChanger: Failed to write file for", icon_info.current)
@@ -381,6 +665,19 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
         if success_count > 0 then
             self:setActiveIconPack(pack_path)
         end
+
+        if include_simpleui and simpleui_success_count > 0 then
+            local err
+            simpleui_enabled, err = self:activateSimpleUIPack(simpleui_pack_dir)
+            if not simpleui_enabled then
+                logger.warn("IconsChanger: Failed to enable SimpleUI icon pack:", err)
+            end
+            simpleui_catalog_count, simpleui_catalog_failed_count, simpleui_catalog_error =
+                self:downloadSimpleUICatalog(mapping, pack_path, Trapper)
+            if simpleui_catalog_error then
+                logger.warn("IconsChanger: Failed to download SimpleUI icon catalog:", simpleui_catalog_error)
+            end
+        end
         
         -- Show final status
         local status_text
@@ -388,6 +685,20 @@ function IconsChanger:downloadAndApplyIcons(mapping, pack_path)
             status_text = T(_("Successfully downloaded %1 icons with color #%2! Please restart KOReader."), success_count, icon_color)
         else
             status_text = T(_("Downloaded %1 icons, %2 failed. Please restart KOReader."), success_count, failed_count)
+        end
+        if include_simpleui then
+            if simpleui_enabled then
+                status_text = status_text .. "\n" .. T(_("Enabled %1 matching SimpleUI icons."), simpleui_success_count)
+            else
+                status_text = status_text .. "\n" .. _("SimpleUI icons were downloaded but could not be enabled automatically.")
+            end
+            if simpleui_catalog_error then
+                status_text = status_text .. "\n" .. _("SimpleUI Quick Actions icon catalog could not be downloaded.")
+            else
+                status_text = status_text .. "\n"
+                    .. T(_("Added %1 SimpleUI Quick Actions icons (%2 failed)."),
+                        simpleui_catalog_count, simpleui_catalog_failed_count)
+            end
         end
         Trapper:clear()
         UIManager:show(InfoMessage:new{

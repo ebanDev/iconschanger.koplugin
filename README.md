@@ -7,6 +7,7 @@ This plugin allows you to change KOReader's icon pack by downloading icons from 
 - Download icon packs from Iconify (200k+ icons from 150+ icon sets)
 - Backup and restore functionality for original icons
 - Support for popular icon packs like Lucide, Feather, Heroicons, Material Design Icons, and many others
+- Optional matching [SimpleUI](https://github.com/doctorhetfield-cmd/simpleui.koplugin) icon customization
 - Easy-to-use interface integrated into KOReader's menu system
 
 ## Installation
@@ -27,12 +28,21 @@ This plugin allows you to change KOReader's icon pack by downloading icons from 
 2. **Apply an Icon Pack:**
    - Go to Settings → More tools → Icon Pack Changer → Change Icon Pack
    - Select from your downloaded icon packs
+   - If SimpleUI is installed, choose whether to generate and enable a matching SimpleUI icon pack too
    - Wait for the download and application process to complete
    - Restart KOReader to see the new icons
 
 3. **Restore Original Icons:**
    - Go to Settings → More tools → Icon Pack Changer → Restore Original Icons
    - This will restore the original mdlight icons
+
+### SimpleUI Integration
+
+When SimpleUI is detected, Icon Pack Changer can generate a matching pack under
+`<KOReader settings dir>/simpleui/sui_icons/packs/`, download the SimpleUI icon
+slots from the selected Iconify family, and enable the generated pack. It also
+downloads the selected family's icon catalog into `simpleui/sui_icons/` for the
+SimpleUI Quick Actions icon picker.
 
 ### Popular Icon Packs
 
